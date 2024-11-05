@@ -1,0 +1,86 @@
+import gradio as gr  # 导入gradio库用于创建GUI
+
+from config import Config  # 导入配置管理模块
+from github_client import GitHubClient  # 导入用于GitHub API操作的客户端
+from report_generator import ReportGenerator  # 导入报告生成器模块
+from llm import LLM  # 导入可能用于处理语言模型的LLM类
+from subscription_manager import SubscriptionManager  # 导入订阅管理器
+from logger import LOG  # 导入日志记录器
+
+# 创建各个组件的实例
+config = Config()
+github_client = GitHubClient(config.github_token)
+llm = LLM()
+report_generator = ReportGenerator(llm)
+subscription_manager = SubscriptionManager(config.subscriptions_file)
+
+
+# 定义导出报告的函数
+def export_progress_by_date_range(repo, days):
+    raw_file_path = github_client.export_progress_by_date_range(repo, days)
+    report, report_file_path = report_generator.generate_report_by_date_range(raw_file_path, days)
+    return report, report_file_path
+
+
+# 添加订阅的函数
+def add_subscription(repo):
+    message, updated_subscriptions = subscription_manager.add_subscription(repo)
+    return message, updated_subscriptions
+
+
+# 删除订阅的函数
+def delete_subscription(repo):
+    message, updated_subscriptions = subscription_manager.delete_subscription(repo)
+    return message, updated_subscriptions
+
+
+# 重新加载订阅的函数
+def reload_subscriptions():
+    updated_subscriptions = subscription_manager.list_subscriptions()
+    return updated_subscriptions
+
+
+# 创建 Gradio 界面
+with gr.Blocks() as demo:
+    gr.Markdown("## GitHub 订阅管理")
+
+    # 添加订阅部分
+    subscription_input = gr.Textbox(label="输入新的订阅", placeholder="例如: langchain-ai/langchain")
+    add_button = gr.Button("添加订阅")
+    delete_button = gr.Button("删除订阅")
+    reload_button = gr.Button("重新加载订阅列表")
+    output_message = gr.Textbox(label="结果", interactive=False)
+
+    # 订阅列表的下拉菜单
+    subscription_dropdown = gr.Dropdown(
+        label="订阅列表",
+        choices=subscription_manager.list_subscriptions(),
+        interactive=True,
+
+    )
+
+    # 添加和删除订阅的操作
+    add_button.click(fn=add_subscription, inputs=subscription_input, outputs=[output_message, subscription_dropdown])
+    delete_button.click(fn=delete_subscription, inputs=subscription_input,
+                        outputs=[output_message, subscription_dropdown])
+
+    # 重新加载订阅列表的操作
+    reload_button.click(fn=reload_subscriptions, outputs=subscription_dropdown)
+
+    # 生成报告部分
+    report_period_input = gr.Slider(value=2, minimum=1, maximum=7, step=1, label="报告周期",
+                                    info="生成项目过去一段时间进展，单位：天")
+    report_button = gr.Button("生成报告")
+    report_output = gr.Markdown(label="报告内容")
+    report_file_output = gr.File(label="下载报告")
+
+    report_button.click(
+        fn=export_progress_by_date_range,
+        inputs=[subscription_dropdown, report_period_input],
+        outputs=[report_output, report_file_output]
+    )
+
+if __name__ == "__main__":
+    demo.launch(share=True, server_name="0.0.0.0")  # 启动界面并设置为公共可访问
+    # 可选带有用户认证的启动方式
+    # demo.launch(share=True, server_name="0.0.0.0", auth=("django", "1234"))
